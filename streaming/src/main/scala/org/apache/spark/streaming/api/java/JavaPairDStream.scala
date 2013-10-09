@@ -24,7 +24,7 @@ import scala.collection.JavaConversions._
 
 import org.apache.spark.streaming._
 import org.apache.spark.streaming.StreamingContext._
-import org.apache.spark.api.java.function.{Function => JFunction, Function2 => JFunction2}
+import org.apache.spark.api.java.function.{Function => JFunction, Function2 => JFunction2, Function4 => JFunction4}
 import org.apache.spark.Partitioner
 import org.apache.hadoop.mapred.{JobConf, OutputFormat}
 import org.apache.hadoop.mapreduce.{OutputFormat => NewOutputFormat}
@@ -398,6 +398,20 @@ class JavaPairDStream[K, V](val dstream: DStream[(K, V)])(
     )
   }
 
+  private def convertUpdateStateFunctionWithKeyAndTime[S](in: JFunction4[Time, K, JList[V], Optional[S], Optional[S]]):
+  (Time, K, Seq[V], Option[S]) => Option[S] = {
+    val scalaFunc: (Time, K, Seq[V], Option[S]) => Option[S] = (time, key, values, state) => {
+      val list: JList[V] = values
+      val scalaState: Optional[S] = JavaUtils.optionToOptional(state)
+      val result: Optional[S] = in.apply(time, key, list, scalaState)
+      result.isPresent match {
+        case true => Some(result.get())
+        case _ => None
+      }
+    }
+    scalaFunc
+  }
+
   private def convertUpdateStateFunction[S](in: JFunction2[JList[V], Optional[S], Optional[S]]):
   (Seq[V], Option[S]) => Option[S] = {
     val scalaFunc: (Seq[V], Option[S]) => Option[S] = (values, state) => {
@@ -457,6 +471,22 @@ class JavaPairDStream[K, V](val dstream: DStream[(K, V)])(
       partitioner: Partitioner
   ): JavaPairDStream[K, S] = {
     dstream.updateStateByKey(convertUpdateStateFunction(updateFunc), partitioner)
+  }
+
+  /**
+   * Create a new "state" DStream where the state for each key is updated by applying
+   * the given function on the previous state of the key and the new values of the key.
+   * [[org.apache.spark.Partitioner]] is used to control the partitioning of each RDD.
+   * @param updateFunc State update function. If `this` function returns None, then
+   *                   corresponding state key-value pair will be eliminated.
+   * @param partitioner Partitioner for controlling the partitioning of each RDD in the new DStream.
+   * @tparam S State type
+   */
+  def updateStateByKey[S: ClassManifest](
+      updateFunc: JFunction4[Time, K, JList[V], Optional[S], Optional[S]],
+      partitioner: Partitioner
+  ): JavaPairDStream[K, S] = {
+    dstream.updateStateByKey(convertUpdateStateFunctionWithKeyAndTime(updateFunc), partitioner)
   }
 
   def mapValues[U](f: JFunction[V, U]): JavaPairDStream[K, U] = {
