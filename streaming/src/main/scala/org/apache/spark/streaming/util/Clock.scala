@@ -27,14 +27,19 @@ private[streaming]
 class SystemClock() extends Clock {
   
   val minPollTime = 25L
+  var deltaTimeMs = 0L
   
   def currentTime(): Long = {
-    System.currentTimeMillis()
-  } 
+    System.currentTimeMillis() + deltaTimeMs
+  }
+
+  def setStartTime(startTimeMs: Long) {
+    deltaTimeMs = startTimeMs - System.currentTimeMillis()
+  }
   
   def waitTillTime(targetTime: Long): Long = {
     var currentTime = 0L
-    currentTime = System.currentTimeMillis()
+    currentTime = this.currentTime()
     
     var waitTime = targetTime - currentTime
     if (waitTime <= 0) {
@@ -51,7 +56,7 @@ class SystemClock() extends Clock {
     
     
     while (true) {
-      currentTime = System.currentTimeMillis()
+      currentTime = this.currentTime()
       waitTime = targetTime - currentTime
       
       if (waitTime <= 0) {

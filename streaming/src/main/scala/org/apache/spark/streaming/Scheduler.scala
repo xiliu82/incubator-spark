@@ -17,7 +17,7 @@
 
 package org.apache.spark.streaming
 
-import util.{ManualClock, RecurringTimer, Clock}
+import util.{ManualClock, RecurringTimer, Clock, SystemClock}
 import org.apache.spark.SparkEnv
 import org.apache.spark.Logging
 
@@ -34,9 +34,7 @@ class Scheduler(ssc: StreamingContext) extends Logging {
     null
   }
 
-  val clockClass = System.getProperty(
-    "spark.streaming.clock", "org.apache.spark.streaming.util.SystemClock")
-  val clock = Class.forName(clockClass).newInstance().asInstanceOf[Clock]
+  val clock = instantiateClock
   val timer = new RecurringTimer(clock, ssc.graph.batchDuration.milliseconds,
     longTime => generateJobs(new Time(longTime)))
   val graph = ssc.graph
@@ -57,6 +55,17 @@ class Scheduler(ssc: StreamingContext) extends Logging {
     if (checkpointWriter != null) checkpointWriter.stop()
     ssc.graph.stop()
     logInfo("Scheduler stopped")    
+  }
+
+  private def instantiateClock: Clock = {
+    val clockClass = System.getProperty("spark.streaming.clock", "org.apache.spark.streaming.util.SystemClock")
+    val clock = Class.forName(clockClass).newInstance().asInstanceOf[Clock]
+    if (clockClass == "org.apache.spark.streaming.util.SystemClock" &&
+      System.getProperty("org.apache.spark.streaming.clock.starttimems") != null) {
+      val startTimeMs = System.getProperty("org.apache.spark.streaming.clock.starttimems").toLong
+      clock.asInstanceOf[SystemClock].setStartTime(startTimeMs)
+    }
+    clock
   }
 
   private def startFirstTime() {
